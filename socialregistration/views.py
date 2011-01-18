@@ -18,9 +18,9 @@ from django.contrib.auth import login, authenticate, logout as auth_logout
 from django.contrib.sites.models import Site
 
 from socialregistration.forms import UserForm
-from socialregistration.utils import (OAuthClient, OAuthTwitter,
+from socialregistration.utils import (OAuthClient, OAuth2Client, OAuthTwitter, OAuth2Foursquare,
     OpenID, _https, DiscoveryFailure)
-from socialregistration.models import FacebookProfile, TwitterProfile, OpenIDProfile
+from socialregistration.models import FacebookProfile, TwitterProfile, OpenIDProfile, FoursquareProfile
 
 
 FB_ERROR = _('We couldn\'t validate your Facebook credentials')
@@ -198,6 +198,50 @@ def twitter(request, account_inactive_template='socialregistration/account_inact
 
     return HttpResponseRedirect(_get_next(request))
 
+def foursquare(request, account_inactive_template='socialregistration/account_inactive.html',
+    extra_context=dict()):
+    """
+    Actually setup/login an account relating to a foursquare user after the oauth
+    process is finished successfully
+    """
+    client = OAuth2Foursquare(
+        request, settings.FOURSQUARE_CONSUMER_KEY,
+        settings.FOURSQUARE_CONSUMER_SECRET_KEY,
+        settings.FOURSQUARE_OAUTH_BASE,
+    )
+
+    user_info = client.get_user_info()
+
+    if request.user.is_authenticated():
+        # Handling already logged in users connecting their accounts
+        try:
+            profile = FoursquareProfile.objects.get(foursquare_id=user_info['id'])
+        except FoursquareProfile.DoesNotExist: # There can only be one profile!
+            profile = FoursquareProfile.objects.create(user=request.user, foursquare_id=user_info['id'])
+
+        return HttpResponseRedirect(_get_next(request))
+
+    user = authenticate(foursquare_id=user_info['id'])
+
+    if user is None:
+        profile = FoursquareProfile(foursquare_id=user_info['id'])
+        user = User()
+        request.session['socialregistration_profile'] = profile
+        request.session['socialregistration_user'] = user
+        request.session['next'] = _get_next(request)
+        return HttpResponseRedirect(reverse('socialregistration_setup'))
+
+    if not user.is_active:
+        return render_to_response(
+            account_inactive_template,
+            extra_context,
+            context_instance=RequestContext(request)
+        )
+
+    login(request, user)
+
+    return HttpResponseRedirect(_get_next(request))
+
 def oauth_redirect(request, consumer_key=None, secret_key=None,
     request_token_url=None, access_token_url=None, authorization_url=None,
     callback_url=None, parameters=None):
@@ -219,6 +263,37 @@ def oauth_callback(request, consumer_key=None, secret_key=None,
     """
     client = OAuthClient(request, consumer_key, secret_key, request_token_url,
         access_token_url, authorization_url, callback_url, parameters)
+
+    extra_context.update(dict(oauth_client=client))
+
+    if not client.is_valid():
+        return render_to_response(
+            template, extra_context, context_instance=RequestContext(request)
+        )
+
+    # We're redirecting to the setup view for this oauth service
+    return HttpResponseRedirect(reverse(client.callback_url))
+
+def oauth2_redirect(request, consumer_key=None, secret_key=None,
+    oauth_base_url=None, oauth_callback_url=None, callback_url=None, parameters=None):
+    """
+    View to handle the OAuth based authentication redirect to the service provider
+    """
+    request.session['next'] = _get_next(request)
+    client = OAuth2Client(request, consumer_key, secret_key,
+        oauth_base_url, oauth_callback_url, callback_url, parameters)
+    return client.get_redirect()
+
+def oauth2_callback(request, consumer_key=None, secret_key=None,
+    oauth_base_url=None, oauth_callback_url=None, callback_url=None,
+    template='socialregistration/oauthcallback.html', extra_context=dict(),
+    parameters=None):
+    """
+    View to handle final steps of OAuth based authentication where the user
+    gets redirected back to from the service provider
+    """
+    client = OAuth2Client(request, consumer_key, secret_key, oauth_base_url,
+        oauth_callback_url, callback_url, parameters)
 
     extra_context.update(dict(oauth_client=client))
 

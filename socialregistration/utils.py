@@ -310,12 +310,119 @@ class OAuth(object):
 
         return content
 
+class OAuth2Client(object):
+
+    def __init__(self, request, consumer_key, consumer_secret, base_url,
+        oauth_callback_url, callback_url, parameters=None):
+
+        self.request = request
+
+        self.base_url = base_url
+
+        self.consumer_key = consumer_key
+        self.consumer_secret = consumer_secret
+
+        self.client = oauth.Client2(self.consumer_key, self.consumer_secret, self.base_url)
+
+        self.parameters = parameters
+
+        self.oauth_callback_url = oauth_callback_url
+        self.callback_url = callback_url
+
+        self.errors = []
+        self.access_token = None
+
+    def _get_access_token(self):
+        """
+        Obtain the access token to access private resources at the API endpoint.
+        """
+        if self.access_token is None:
+            code = self.request.GET.get("code")
+            response = self.client.access_token(code, redirect_uri='http://%s%s' % (Site.objects.get_current().domain,
+                    reverse(self.oauth_callback_url)), grant_type='authorization_code')
+            self.access_token = response["access_token"]
+
+            self.request.session['oauth_%s_access_token' % get_token_prefix(self.base_url)] = self.access_token
+        return self.access_token
+
+    def _get_authorization_url(self):
+        return self.client.authorization_url(redirect_uri='http://%s%s' % (Site.objects.get_current().domain,
+                reverse(self.oauth_callback_url)), endpoint='authenticate')
+
+    def is_valid(self):
+        try:
+            self._get_access_token()
+        except OAuthError, e:
+            self.errors.append(e.args[0])
+            return False
+        return True
+
+
+    def get_redirect(self):
+        """
+        Returns a ``HttpResponseRedirect`` object to redirect the user to the
+        URL the OAuth provider handles authorization.
+        """
+        return HttpResponseRedirect(self._get_authorization_url())
+
+class OAuth2(object):
+    """
+    Base class to perform oauth signed requests from access keys saved in a user's
+    session.
+    See the ``OAuthTwitter`` class below for an example.
+    """
+
+    def __init__(self, request, consumer_key, secret_key, base_url):
+        self.request = request
+
+        self.consumer_key = consumer_key
+        self.secret_key = secret_key
+        self.base_url = base_url
+
+    def _get_at_from_session(self):
+        """
+        Get the saved access token for private resources from the session.
+        """
+        try:
+            return self.request.session['oauth_%s_access_token' % get_token_prefix(self.base_url)]
+        except KeyError:
+            raise OAuthError(
+                _('No access token saved for "%s".') % get_token_prefix(self.base_url))
+
+    def query(self, url, method="GET", params=dict(), headers=dict()):
+        """
+        Request a API endpoint at ``url`` with ``params`` being either the
+        POST or GET data.
+        """
+        access_token = self._get_at_from_session()
+
+        client = oauth.Client2(self.consumer_key, self.secret_key, self.base_url)
+
+        response, content = client.request(url, access_token=access_token, method=method,
+            headers=headers, params=params)
+
+        if response['status'] != '200':
+            raise OAuthError(
+                _('No access to private resources at "%s".') % get_token_prefix(self.request_token_url))
+
+        return content
+
 class OAuthTwitter(OAuth):
     """
     Verifying twitter credentials
     """
-    url = 'https://twitter.com/account/verify_credentials.json'
+    url = 'https://api.twitter.com/1/account/verify_credentials.json'
 
     def get_user_info(self):
         user = simplejson.loads(self.query(self.url))
+        return user
+
+class OAuth2Foursquare(OAuth2):
+    """
+    Verifying 4sq credentials
+    """
+    url = 'https://api.foursquare.com/v2/users/self'
+
+    def get_user_info(self):
+        user = simplejson.loads(self.query(self.url))["response"]["user"]
         return user

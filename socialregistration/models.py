@@ -26,6 +26,17 @@ class TwitterProfile(models.Model):
     def authenticate(self):
         return authenticate(twitter_id=self.twitter_id)
 
+class FoursquareProfile(models.Model):
+    user = models.ForeignKey(User)
+    site = models.ForeignKey(Site, default=Site.objects.get_current)
+    foursquare_id = models.PositiveIntegerField()
+
+    def __unicode__(self):
+        return u'%s: %s' % (self.user, self.foursquare_id)
+
+    def authenticate(self):
+        return authenticate(foursquare_id=self.foursquare_id)
+
 class OpenIDProfile(models.Model):
     user = models.ForeignKey(User)
     site = models.ForeignKey(Site, default=Site.objects.get_current)

@@ -58,6 +58,33 @@ if getattr(settings, 'TWITTER_CONSUMER_KEY', None) is not None:
         url('^twitter/$', 'socialregistration.views.twitter', name='twitter'),
     )
 
+#Setup Foursquare URLs if there's an API key specified
+if getattr(settings, 'FOURSQUARE_CONSUMER_KEY', None) is not None:
+    urlpatterns = urlpatterns + patterns('',
+        url('^4sq/redirect/$', 'socialregistration.views.oauth2_redirect',
+            dict(
+                consumer_key=settings.FOURSQUARE_CONSUMER_KEY,
+                secret_key=settings.FOURSQUARE_CONSUMER_SECRET_KEY,
+                oauth_base_url=settings.FOURSQUARE_OAUTH_BASE,
+                oauth_callback_url='foursquare_callback',
+                callback_url='foursquare_callback'
+            ),
+            name='foursquare_redirect'),
+
+        url('^4sq/callback/$', 'socialregistration.views.oauth2_callback',
+            dict(
+                consumer_key=settings.FOURSQUARE_CONSUMER_KEY,
+                secret_key=settings.FOURSQUARE_CONSUMER_SECRET_KEY,
+                oauth_base_url=settings.FOURSQUARE_OAUTH_BASE,
+                oauth_callback_url='foursquare_callback',
+                callback_url='foursquare'
+            ),
+            name='foursquare_callback'
+        ),
+        url('^4sq/$', 'socialregistration.views.foursquare', name='foursquare'),
+    )
+
+
 urlpatterns = urlpatterns + patterns('',
     url('^openid/redirect/$', 'socialregistration.views.openid_redirect', name='openid_redirect'),
     url('^openid/callback/$', 'socialregistration.views.openid_callback', name='openid_callback')
